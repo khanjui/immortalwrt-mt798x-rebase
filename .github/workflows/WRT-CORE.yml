@@ -1,0 +1,182 @@
+name: WRT-CORE
+
+on:
+  workflow_call:
+    inputs:
+      WRT_CONFIG:
+        required: true
+        type: string
+
+      WRT_REPO:
+        required: true
+        type: string
+
+      WRT_BRANCH:
+        required: true
+        type: string
+
+      WRT_SOURCE:
+        required: true
+        type: string
+
+env:
+  WRT_CONFIG: ${{ inputs.WRT_CONFIG }}
+  WRT_REPO: ${{ inputs.WRT_REPO }}
+  WRT_BRANCH: ${{ inputs.WRT_BRANCH }}
+  WRT_SOURCE: ${{ inputs.WRT_SOURCE }}
+
+jobs:
+  build:
+    name: ${{ inputs.WRT_SOURCE }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout CI repository
+        uses: actions/checkout@v4
+
+      - name: Initialize build environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo -E apt-get -yqq update
+          sudo -E apt-get -yqq install \
+            dos2unix \
+            libfuse-dev
+
+          sudo bash -c \
+            'bash <(curl -fsSL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+
+          sudo -E systemctl daemon-reload
+          sudo -E timedatectl set-timezone UTC
+
+          sudo mkdir -p /mnt/build_wrt
+          sudo chown "$USER:$USER" /mnt/build_wrt
+
+          ln -s /mnt/build_wrt "$GITHUB_WORKSPACE/wrt"
+
+      - name: Initialize build information
+        run: |
+          echo "WRT_DATE=$(date -u +"%Y.%m.%d-%H.%M.%S")" >> "$GITHUB_ENV"
+          echo "WRT_INFO=${WRT_SOURCE%%/*}" >> "$GITHUB_ENV"
+          echo "WRT_TARGET=mediatek" >> "$GITHUB_ENV"
+
+      - name: Clone Chasey source
+        run: |
+          git clone \
+            --depth=1 \
+            --single-branch \
+            --branch "$WRT_BRANCH" \
+            "$WRT_REPO" \
+            ./wrt/
+
+          cd ./wrt/
+
+          echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> "$GITHUB_ENV"
+
+      - name: Verify Chasey source
+        run: |
+          test -d ./wrt/defconfig
+          test -f ./wrt/defconfig/mt7981-ax3000.config
+
+      - name: Install source defconfig
+        run: |
+          cd ./wrt/
+
+          cp ./defconfig/mt7981-ax3000.config ./.config
+
+      - name: Reduce configuration to normal AX3000T
+        run: |
+          cd ./wrt/
+
+          # Remove all target-device selections from Chasey's multi-device defconfig.
+          sed -i '/^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_/d' .config
+          sed -i '/^CONFIG_TARGET_MULTI_PROFILE=/d' .config
+
+          # Select only the normal Xiaomi Mi Router AX3000T profile.
+          cat >> .config <<'EOF'
+          CONFIG_TARGET_mediatek=y
+          CONFIG_TARGET_mediatek_filogic=y
+          CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_xiaomi_mi-router-ax3000t=y
+          CONFIG_TARGET_DEVICE_PACKAGES_mediatek_filogic_DEVICE_xiaomi_mi-router-ax3000t=""
+          EOF
+
+      - name: Update feeds
+        run: |
+          cd ./wrt/
+
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Generate final configuration
+        run: |
+          cd ./wrt/
+
+          make defconfig -j"$(nproc)"
+
+      - name: Save final configuration
+        run: |
+          cd ./wrt/
+
+          mkdir -p ./upload/
+
+          cp ./.config \
+            "./upload/Config-${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_DATE}.txt"
+
+      - name: Download sources
+        run: |
+          cd ./wrt/
+
+          make download -j"$(nproc)"
+
+      - name: Compile firmware
+        run: |
+          cd ./wrt/
+
+          make -j"$(nproc)" || make -j1 V=s
+
+      - name: Package firmware
+        run: |
+          cd ./wrt/
+
+          find ./bin/targets/ \
+            -type f \
+            \( -name "*.buildinfo" \
+            -o -name "*.json" \
+            -o -name "sha256sums" \
+            -o -name "packages" \
+            \) \
+            -delete
+
+          while IFS= read -r -d '' FILE; do
+            BASE=$(basename "$FILE")
+
+            case "$BASE" in
+              *factory.bin|*sysupgrade.bin|*.itb|*.img|*.ubi|*.manifest)
+                cp -f "$FILE" ./upload/
+                ;;
+            esac
+          done < <(find ./bin/targets/ -type f -print0)
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ env.WRT_CONFIG }}-${{ env.WRT_INFO }}-${{ env.WRT_BRANCH }}-${{ env.WRT_DATE }}"
+          name: "${{ env.WRT_CONFIG }} - ${{ env.WRT_BRANCH }}"
+          body: |
+            Clean Chasey ImmortalWrt build.
+
+            Source:
+            ${{ env.WRT_REPO }}
+
+            Branch:
+            ${{ env.WRT_BRANCH }}
+
+            Commit:
+            ${{ env.WRT_HASH }}
+
+            Device:
+            Xiaomi Mi Router AX3000T
+
+            Profile:
+            Normal
+          files: ./wrt/upload/*
