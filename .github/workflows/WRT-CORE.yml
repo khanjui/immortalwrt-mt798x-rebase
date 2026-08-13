@@ -134,49 +134,32 @@ jobs:
 
           make -j"$(nproc)" || make -j1 V=s
 
-      - name: Package firmware
+           - name: Package firmware
         run: |
           cd ./wrt/
 
-          find ./bin/targets/ \
+          mkdir -p ./upload
+
+          SYSUPGRADE=$(find ./bin/targets/mediatek/filogic/ \
+            -maxdepth 1 \
             -type f \
-            \( -name "*.buildinfo" \
-            -o -name "*.json" \
-            -o -name "sha256sums" \
-            -o -name "packages" \
-            \) \
-            -delete
+            -name 'xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin' \
+            -print -quit)
 
-          while IFS= read -r -d '' FILE; do
-            BASE=$(basename "$FILE")
+          if [ -z "$SYSUPGRADE" ]; then
+            echo "ERROR: AX3000T sysupgrade image not found!"
+            echo ""
+            echo "Available firmware files:"
+            find ./bin/targets/mediatek/filogic/ \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' | sort
+            exit 1
+          fi
 
-            case "$BASE" in
-              *factory.bin|*sysupgrade.bin|*.itb|*.img|*.ubi|*.manifest)
-                cp -f "$FILE" ./upload/
-                ;;
-            esac
-          done < <(find ./bin/targets/ -type f -print0)
+          cp "$SYSUPGRADE" \
+            ./upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
 
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "${{ env.WRT_CONFIG }}-${{ env.WRT_INFO }}-${{ env.WRT_BRANCH }}-${{ env.WRT_DATE }}"
-          name: "${{ env.WRT_CONFIG }} - ${{ env.WRT_BRANCH }}"
-          body: |
-            Clean Chasey ImmortalWrt build.
-
-            Source:
-            ${{ env.WRT_REPO }}
-
-            Branch:
-            ${{ env.WRT_BRANCH }}
-
-            Commit:
-            ${{ env.WRT_HASH }}
-
-            Device:
-            Xiaomi Mi Router AX3000T
-
-            Profile:
-            Normal
-          files: ./wrt/upload/*
+          sha256sum \
+            ./upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin \
+            > ./upload/sha256sums
