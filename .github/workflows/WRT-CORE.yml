@@ -94,22 +94,20 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/wrt"
 
-          # Chasey's defconfig is a multi-device configuration.
-          # Keep MULTI_PROFILE enabled so Kconfig stays in the multi-device
-          # target choice instead of falling back to the default single
-          # profile (OpenWrt One).
+          # Keep multi-profile mode enabled.
+          # This prevents Kconfig from falling back to OpenWrt One.
 
-          # Remove all currently selected per-device entries.
+          # Remove all currently selected Filogic device profiles.
           sed -i '/^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_.*=y$/d' .config
 
-          # Remove corresponding per-device package strings.
+          # Remove all per-device package assignments.
           sed -i '/^CONFIG_TARGET_DEVICE_PACKAGES_mediatek_filogic_DEVICE_.*=/d' .config
 
-          # Explicitly select multi-profile mode.
+          # Explicitly enable multi-profile mode.
           sed -i '/^CONFIG_TARGET_MULTI_PROFILE=/d' .config
           echo 'CONFIG_TARGET_MULTI_PROFILE=y' >> .config
 
-          # Enable ONLY the normal Xiaomi Mi Router AX3000T.
+          # Select ONLY the normal Xiaomi Mi Router AX3000T.
           cat >> .config <<'EOF'
           CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_xiaomi_mi-router-ax3000t=y
           CONFIG_TARGET_DEVICE_PACKAGES_mediatek_filogic_DEVICE_xiaomi_mi-router-ax3000t=""
@@ -222,7 +220,7 @@ jobs:
 
           make -j"$(nproc)" || make -j1 V=s
 
-           - name: Verify generated AX3000T image
+      - name: Verify generated AX3000T image
         run: |
           cd "$GITHUB_WORKSPACE/wrt"
 
@@ -277,6 +275,9 @@ jobs:
           cp "$SYSUPGRADE" \
             upload/immortalwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
 
+          echo
+          echo "===== FINDING MANIFEST ====="
+
           MANIFEST=$(find \
             bin/targets/mediatek/filogic \
             -maxdepth 1 \
@@ -286,17 +287,35 @@ jobs:
 
           if [ -z "$MANIFEST" ]; then
             echo "ERROR: manifest file not found."
+
+            find bin/targets/mediatek/filogic \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' | sort
+
             exit 1
           fi
 
+          echo "Found:"
+          echo "$MANIFEST"
+
           cp "$MANIFEST" upload/
+
+          echo
+          echo "===== COPYING FINAL CONFIG ====="
 
           cp .config \
             "upload/Config-${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_DATE}.txt"
 
+          echo
+          echo "===== GENERATING SHA256 ====="
+
           sha256sum \
             upload/immortalwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin \
             > upload/sha256sums
+
+          echo
+          echo "===== FILES TO RELEASE ====="
 
           ls -lh upload/
 
