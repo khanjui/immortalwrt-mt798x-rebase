@@ -1,29 +1,20 @@
-      - name: Package firmware
-        run: |
-          cd ./wrt/
+name: Chasey ImmortalWrt - AX3000T
 
-          mkdir -p ./upload
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/WRT-TEST.yml"
 
-          SYSUPGRADE=$(find ./bin/targets/mediatek/filogic/ \
-            -maxdepth 1 \
-            -type f \
-            -name 'xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin' \
-            -print -quit)
+permissions:
+  contents: write
 
-          if [ -z "$SYSUPGRADE" ]; then
-            echo "ERROR: AX3000T sysupgrade image not found!"
-            echo ""
-            echo "Available firmware files:"
-            find ./bin/targets/mediatek/filogic/ \
-              -maxdepth 1 \
-              -type f \
-              -printf '%f\n' | sort
-            exit 1
-          fi
-
-          cp "$SYSUPGRADE" \
-            ./upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
-
-          sha256sum \
-            ./upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin \
-            > ./upload/sha256sums
+jobs:
+  build:
+    name: Build Xiaomi AX3000T
+    uses: ./.github/workflows/WRT-CORE.yml
+    with:
+      WRT_CONFIG: AX3000T
+      WRT_REPO: https://github.com/chasey-dev/immortalwrt-mt798x-rebase.git
+      WRT_BRANCH: 25.12
+      WRT_SOURCE: chasey-dev/immortalwrt-mt798x-rebase
