@@ -19,16 +19,19 @@ on:
         required: true
         type: string
 
-env:
-  WRT_CONFIG: ${{ inputs.WRT_CONFIG }}
-  WRT_REPO: ${{ inputs.WRT_REPO }}
-  WRT_BRANCH: ${{ inputs.WRT_BRANCH }}
-  WRT_SOURCE: ${{ inputs.WRT_SOURCE }}
+permissions:
+  contents: write
 
 jobs:
   build:
-    name: ${{ inputs.WRT_SOURCE }}
+    name: ${{ inputs.WRT_CONFIG }}
     runs-on: ubuntu-24.04
+
+    env:
+      WRT_CONFIG: ${{ inputs.WRT_CONFIG }}
+      WRT_REPO: ${{ inputs.WRT_REPO }}
+      WRT_BRANCH: ${{ inputs.WRT_BRANCH }}
+      WRT_SOURCE: ${{ inputs.WRT_SOURCE }}
 
     steps:
       - name: Checkout CI repository
@@ -58,7 +61,6 @@ jobs:
         run: |
           echo "WRT_DATE=$(date -u +"%Y.%m.%d-%H.%M.%S")" >> "$GITHUB_ENV"
           echo "WRT_INFO=${WRT_SOURCE%%/*}" >> "$GITHUB_ENV"
-          echo "WRT_TARGET=mediatek" >> "$GITHUB_ENV"
 
       - name: Clone Chasey source
         run: |
@@ -67,32 +69,29 @@ jobs:
             --single-branch \
             --branch "$WRT_BRANCH" \
             "$WRT_REPO" \
-            ./wrt/
+            "$GITHUB_WORKSPACE/wrt"
 
-          cd ./wrt/
+          cd "$GITHUB_WORKSPACE/wrt"
 
           echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> "$GITHUB_ENV"
 
       - name: Verify Chasey source
         run: |
-          test -d ./wrt/defconfig
-          test -f ./wrt/defconfig/mt7981-ax3000.config
+          test -d "$GITHUB_WORKSPACE/wrt/defconfig"
+          test -f "$GITHUB_WORKSPACE/wrt/defconfig/mt7981-ax3000.config"
 
-      - name: Install source defconfig
+      - name: Install Chasey defconfig
         run: |
-          cd ./wrt/
+          cd "$GITHUB_WORKSPACE/wrt"
+          cp defconfig/mt7981-ax3000.config .config
 
-          cp ./defconfig/mt7981-ax3000.config ./.config
-
-      - name: Reduce configuration to normal AX3000T
+      - name: Select normal AX3000T only
         run: |
-          cd ./wrt/
+          cd "$GITHUB_WORKSPACE/wrt"
 
-          # Remove all target-device selections from Chasey's multi-device defconfig.
           sed -i '/^CONFIG_TARGET_DEVICE_mediatek_filogic_DEVICE_/d' .config
           sed -i '/^CONFIG_TARGET_MULTI_PROFILE=/d' .config
 
-          # Select only the normal Xiaomi Mi Router AX3000T profile.
           cat >> .config <<'EOF'
           CONFIG_TARGET_mediatek=y
           CONFIG_TARGET_mediatek_filogic=y
@@ -102,55 +101,51 @@ jobs:
 
       - name: Update feeds
         run: |
-          cd ./wrt/
-
+          cd "$GITHUB_WORKSPACE/wrt"
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       - name: Generate final configuration
         run: |
-          cd ./wrt/
-
+          cd "$GITHUB_WORKSPACE/wrt"
           make defconfig -j"$(nproc)"
 
       - name: Save final configuration
         run: |
-          cd ./wrt/
+          cd "$GITHUB_WORKSPACE/wrt"
+          mkdir -p upload
 
-          mkdir -p ./upload/
-
-          cp ./.config \
-            "./upload/Config-${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_DATE}.txt"
+          cp .config \
+            "upload/Config-${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_DATE}.txt"
 
       - name: Download sources
         run: |
-          cd ./wrt/
-
+          cd "$GITHUB_WORKSPACE/wrt"
           make download -j"$(nproc)"
 
-           - name: Compile firmware
+      - name: Compile firmware
         run: |
-          cd ./wrt/
-
+          cd "$GITHUB_WORKSPACE/wrt"
           make -j"$(nproc)" || make -j1 V=s
 
       - name: Package firmware
         run: |
-          cd ./wrt/
+          cd "$GITHUB_WORKSPACE/wrt"
 
-          mkdir -p ./upload
+          mkdir -p upload
 
-          SYSUPGRADE=$(find ./bin/targets/mediatek/filogic/ \
+          SYSUPGRADE=$(find \
+            bin/targets/mediatek/filogic \
             -maxdepth 1 \
             -type f \
             -name 'xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin' \
             -print -quit)
 
           if [ -z "$SYSUPGRADE" ]; then
-            echo "ERROR: AX3000T sysupgrade image not found!"
-            echo ""
-            echo "Available firmware files:"
-            find ./bin/targets/mediatek/filogic/ \
+            echo "ERROR: AX3000T sysupgrade image not found."
+            echo
+            echo "Available files:"
+            find bin/targets/mediatek/filogic \
               -maxdepth 1 \
               -type f \
               -printf '%f\n' | sort
@@ -158,8 +153,35 @@ jobs:
           fi
 
           cp "$SYSUPGRADE" \
-            ./upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
+            upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
 
           sha256sum \
-            ./upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin \
-            > ./upload/sha256sums
+            upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin \
+            > upload/sha256sums
+
+      - name: Show release files
+        run: |
+          cd "$GITHUB_WORKSPACE/wrt"
+          echo "Files to publish:"
+          ls -lh upload/
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "${{ env.WRT_CONFIG }}-${{ env.WRT_SOURCE }}-${{ env.WRT_BRANCH }}-${{ env.WRT_DATE }}"
+          name: "${{ env.WRT_CONFIG }}-${{ env.WRT_SOURCE }}-${{ env.WRT_BRANCH }}-${{ env.WRT_DATE }}"
+          body: |
+            Clean Chasey ImmortalWrt build
+
+            Source: ${{ env.WRT_REPO }}
+            Branch: ${{ env.WRT_BRANCH }}
+            Commit: ${{ env.WRT_HASH }}
+
+            Device: Xiaomi Mi Router AX3000T
+            Profile: Normal
+
+            No CloseWRT configuration, packages, themes,
+            or Settings.sh customizations were applied.
+          files: |
+            ./wrt/upload/openwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
+            ./wrt/upload/sha256sums
