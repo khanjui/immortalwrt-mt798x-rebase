@@ -128,13 +128,13 @@ jobs:
 
           make download -j"$(nproc)"
 
-      - name: Compile firmware
+           - name: Compile firmware
         run: |
           cd ./wrt/
 
           make -j"$(nproc)" || make -j1 V=s
 
-           - name: Package firmware
+      - name: Package firmware
         run: |
           cd ./wrt/
 
