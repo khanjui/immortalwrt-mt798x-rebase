@@ -251,11 +251,13 @@ jobs:
           echo "Found:"
           echo "$SYSUPGRADE"
 
-      - name: Package only normal AX3000T sysupgrade
+      - name: Package AX3000T files
         run: |
           cd "$GITHUB_WORKSPACE/wrt"
 
           mkdir -p upload
+
+          echo "===== FINDING SYSUPGRADE ====="
 
           SYSUPGRADE=$(find \
             bin/targets/mediatek/filogic \
@@ -265,25 +267,59 @@ jobs:
             -print -quit)
 
           if [ -z "$SYSUPGRADE" ]; then
-            echo "ERROR: AX3000T sysupgrade.bin not found."
+            echo "ERROR: AX3000T sysupgrade image not found."
             exit 1
           fi
 
+          echo "Found:"
+          echo "$SYSUPGRADE"
+
           cp "$SYSUPGRADE" \
             upload/immortalwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
+
+          echo
+          echo "===== FINDING MANIFEST ====="
+
+          MANIFEST=$(find \
+            bin/targets/mediatek/filogic \
+            -maxdepth 1 \
+            -type f \
+            -name '*.manifest' \
+            -print -quit)
+
+          if [ -z "$MANIFEST" ]; then
+            echo "ERROR: manifest file not found."
+            find bin/targets/mediatek/filogic \
+              -maxdepth 1 \
+              -type f \
+              -printf '%f\n' | sort
+            exit 1
+          fi
+
+          echo "Found:"
+          echo "$MANIFEST"
+
+          cp "$MANIFEST" upload/
+
+          echo
+          echo "===== COPYING FINAL CONFIG ====="
+
+          cp .config \
+            "upload/Config-${WRT_CONFIG}-${WRT_INFO}-${WRT_BRANCH}-${WRT_DATE}.txt"
+
+          echo
+          echo "===== GENERATING SHA256 ====="
 
           sha256sum \
             upload/immortalwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin \
             > upload/sha256sums
 
-      - name: Show release files
-        run: |
-          cd "$GITHUB_WORKSPACE/wrt"
+          echo
+          echo "===== FILES TO RELEASE ====="
 
-          echo "===== RELEASE FILES ====="
           ls -lh upload/
 
-      - name: Create GitHub release
+            - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "${{ env.WRT_CONFIG }}-${{ env.WRT_INFO }}-${{ env.WRT_BRANCH }}-${{ env.WRT_DATE }}"
@@ -298,7 +334,9 @@ jobs:
             Device: Xiaomi Mi Router AX3000T
             Variant: Normal / stock layout
 
-            Only the normal AX3000T sysupgrade image is published.
+            Configuration and manifest included.
           files: |
             ./wrt/upload/immortalwrt-mediatek-filogic-xiaomi_mi-router-ax3000t-squashfs-sysupgrade.bin
+            ./wrt/upload/Config-${{ env.WRT_CONFIG }}-${{ env.WRT_INFO }}-${{ env.WRT_BRANCH }}-${{ env.WRT_DATE }}.txt
+            ./wrt/upload/*.manifest
             ./wrt/upload/sha256sums
