@@ -2,16 +2,12 @@ name: Chasey ImmortalWrt - AX3000T
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/WRT-TEST.yml"
 
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Build Xiaomi AX3000T
     uses: ./.github/workflows/WRT-CORE.yml
     with:
       WRT_CONFIG: AX3000T
