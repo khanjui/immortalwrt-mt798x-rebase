@@ -251,7 +251,7 @@ jobs:
           echo "Found:"
           echo "$SYSUPGRADE"
 
-      - name: Package AX3000T files
+            - name: Package AX3000T files
         run: |
           cd "$GITHUB_WORKSPACE/wrt"
 
@@ -319,7 +319,7 @@ jobs:
 
           ls -lh upload/
 
-            - name: Create GitHub release
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "${{ env.WRT_CONFIG }}-${{ env.WRT_INFO }}-${{ env.WRT_BRANCH }}-${{ env.WRT_DATE }}"
